@@ -1,7 +1,6 @@
 mod date_format;
 mod supabase;
 
-use axum::Json;
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 use supabase::authenticate_supabase_client;
