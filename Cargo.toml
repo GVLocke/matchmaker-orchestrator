@@ -1,0 +1,13 @@
+[package]
+name = "matchmaker-orchestrator"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = { version = "0.8.7", features = ["http2", "macros", "ws"] }
+chrono = "0.4.42"
+dotenvy = "0.15.7"
+serde = { version = "1.0.228", features = ["derive"] }
+supabase-lib-rs = "0.5.3"
+tokio = { version = "1.48.0", features = ["full"] }
+uuid = { version = "1.18.1", features = ["v4"] }
