@@ -1,7 +1,6 @@
 use supabase::Client;
 use std::env;
 use dotenvy::dotenv;
-use serde_json::{json, Value};
 
 async fn authenticate_supabase_client() -> supabase::Result<Client> {
     dotenv().ok();
