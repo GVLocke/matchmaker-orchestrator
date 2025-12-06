@@ -15,9 +15,3 @@ pub async fn download_pdf(filename: &str) -> supabase::Result<axum::body::Bytes>
     let client = authenticate_supabase_client().await;
     client.expect("Failed to authenticate with supabase storage").storage().download("resumes", filename).await
 }
-
-pub async fn insert_into_resume_table(filename: &str, structured: Value, resume_text: &str) -> supabase::Result<Vec<Value>> {
-    let client = authenticate_supabase_client().await?;
-    client.database().upsert("resumes")
-        .values(json!({"filename": filename, "text": resume_text, "structured": structured}))?.execute().await
-}
