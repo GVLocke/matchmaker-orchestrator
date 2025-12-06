@@ -1,0 +1,64 @@
+{
+    "type": "object",
+    "properties": {
+        "education": {
+            "type": "array",
+            "description": "Array of objects representing different degrees completed or in progress.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "school": {
+                        "type": "string",
+                        "description": "name of the institution"
+                    },
+                    "degree_type": {
+                        "type": "string",
+                        "description": "title of the degree (i.e. phd, bs, ms, etc.)"
+                    },
+                    "degree_title": {
+                        "type": "string",
+                        "description": "name of the degree (i.e. BS in Computer Science)"
+                    },
+                    "grad_date": {
+                        "type": "string",
+                        "description": "Month and year of graduation"
+                    },
+                    "GPA": {
+                        "type": "string",
+                        "description": "GPA value. Null if not present"
+                    }
+                },
+                "required": ["school", "degree_type", "degree_title", "grad_date", "GPA"],
+                "additionalProperties": false
+            }
+        },
+        "skills": {
+            "type": "array",
+            "description": "Array of description of skills",
+            "items": {
+                "type": "string"
+            }
+        },
+        "experience": {
+            "type": "array",
+            "description": "Array of objects representing work experience",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "role": {
+                        "type": "string",
+                        "description": "Title of the job role"
+                    },
+                    "years_of_experience": {
+                        "type": "string",
+                        "description": "Length of time served in role in years, integer"
+                    }
+                },
+                "required": ["role", "years_of_experience"],
+                "additionalProperties": false
+            }
+        }
+    },
+    "required": ["education", "skills", "experience"],
+    "additionalProperties": false
+}

@@ -1,13 +1,12 @@
-mod analysis_request_components;
-
+mod requests;
 use axum::{routing::get, Router};
-use analysis_request_components::{get_analysis};
+use requests::handle_upload;
 
 #[tokio::main]
 async fn main() {
     // Create the axum router
     let router01 = Router::new()
-        .route("/analysis", get(get_analysis));
+        .route("/scrape", get(handle_upload));
 
     // Define the IP and port listener (TCP)
     let address = "0.0.0.0:3000";
