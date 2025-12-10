@@ -3,24 +3,6 @@ use dotenvy::dotenv;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value};
 
-// pub struct Resume {
-//     education: Vec<EducationEntry>,
-//     skills: Vec<String>,
-//     experience: Vec<ExperienceEntry>,
-// }
-//
-// pub struct EducationEntry {
-//     school: String,
-//     degree_type: String,
-//     degree_title: String,
-//     grad_date: String,
-//     gpa: f32
-// }
-//
-// pub struct ExperienceEntry {
-//     role: String,
-//     years_of_experience: f32
-// }
 
 #[derive(Serialize)]
 pub struct LLMRequest {
@@ -41,9 +23,7 @@ pub enum ResponseFormat {
     #[serde(rename = "json_schema")]
     JsonSchema {
         json_schema: JsonSchemaDefinition,
-    },
-    #[serde(rename = "text")]
-    Text,
+    }
 }
 
 #[derive(Serialize, Debug)]
@@ -84,7 +64,7 @@ pub async fn generate_structure_from_pdf(resume_text : &str) -> Result<ChatCompl
         response_format: ResponseFormat::JsonSchema {
             json_schema: JsonSchemaDefinition {
                 name: "resume_data_structuring".to_string(),
-                strict: false,
+                strict: true,
                 schema: parsed_schema,
             },
         },
