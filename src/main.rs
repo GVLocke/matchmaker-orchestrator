@@ -3,7 +3,7 @@ mod requests;
 use std::env;
 use axum::{routing::get, routing::post, Extension, Router};
 use dotenvy::dotenv;
-use requests::handle_upload;
+use requests::{handle_single_upload, handle_batch_upload};
 use tower_http::trace::{self, TraceLayer};
 use tracing::Level;
 use sqlx::postgres::PgPoolOptions;
@@ -27,7 +27,8 @@ async fn main() {
 
     // Create the axum router
     let app = Router::new()
-        .route("/scrape", post(handle_upload))
+        .route("/scrape/individual", post(handle_single_upload))
+        .route("/scrape/batch", post(handle_batch_upload))
         .route("/hello-world", get(hello_world))
         .layer(
         TraceLayer::new_for_http()
