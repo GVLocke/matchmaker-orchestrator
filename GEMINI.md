@@ -17,11 +17,13 @@ This is a Rust-based backend service built with **Axum** designed to orchestrate
 *   **Storage:** Supabase Storage
 *   **AI Integration:** OpenAI API (for unstructured text parsing)
 *   **Logging:** Tracing & Tracing Subscriber
+*   **Error Handling:** Uses `anyhow` for error propagation and `tracing` for structured logging. Panics are avoided in background tasks.
 
 ## Key Files
-*   `src/main.rs`: Application entry point. Configures environment variables, database connection pool, Supabase client, and HTTP routes.
-*   `src/requests.rs`: Contains the route handlers (`handle_single_upload`, `handle_batch_upload`) and the core business logic for file processing and LLM interaction.
-*   `src/requests/openai.rs`: Handles communication with the OpenAI API, including schema generation.
+*   `src/main.rs`: Entry point. Initializes `AppState` (shared DB pool, HTTP client, configuration, Semaphore) and sets up Axum routes.
+*   `src/service.rs`: **Core Business Logic.** Contains the `ResumeService` struct which handles PDF extraction, LLM orchestration, ZIP processing, and DB updates.
+*   `src/requests.rs`: HTTP Route handlers (`handle_single_upload`, `handle_batch_upload`). These are lightweight wrappers that delegate to `ResumeService`.
+*   `src/requests/openai.rs`: Helper functions for communicating with the OpenAI API.
 *   `src/resume_schema.json`: Defines the expected JSON structure for the parsed resume data.
 *   `Cargo.toml`: Project dependencies.
 
@@ -39,6 +41,7 @@ DATABASE_URL=postgres://user:pass@host:port/dbname
 SUPABASE_ENDPOINT=https://your-project.supabase.co
 SERVICE_KEY=your-supabase-service-role-key
 OPENAI_API_KEY=your-openai-api-key
+MAX_CONCURRENT_TASKS=10  # Optional: Defaults to 10 if not set
 ```
 
 ### Commands
@@ -58,15 +61,15 @@ OPENAI_API_KEY=your-openai-api-key
 ### `POST /scrape/individual`
 Triggers processing for a single uploaded PDF.
 *   **Payload:** JSON containing the file record (ID and filename).
-*   **Behavior:** Downloads PDF, extracts text, structures it via LLM, updates DB. Returns HTTP 202 Accepted immediately; processing happens in the background.
+*   **Behavior:** Spawns a background task via `ResumeService`. Returns HTTP 202 Accepted immediately.
 
 ### `POST /scrape/batch`
 Triggers processing for a ZIP archive of resumes.
 *   **Payload:** JSON containing the file record.
-*   **Behavior:** Downloads ZIP, extracts contents, filters for PDFs, re-uploads individual PDFs to storage, and spawns processing tasks for each. Returns HTTP 202 Accepted.
+*   **Behavior:** Spawns a background task via `ResumeService` to extract the ZIP and re-upload individual PDFs. Returns HTTP 202 Accepted.
 
 ## Development Conventions
-*   **Error Handling:** Currently relies heavily on panics (`.unwrap()`, `.expect()`) within background tasks. *Note: This is an active area for refactoring.*
-*   **Concurrency:** Uses `tokio::spawn` for fire-and-forget background processing.
+*   **State Management:** All shared state is held in `AppState` and injected via Axum's `State` extractor.
+*   **Concurrency:** Uses `tokio::spawn` for background tasks, throttled by a `tokio::sync::Semaphore` (limit defined by `MAX_CONCURRENT_TASKS`) to prevent resource exhaustion.
 *   **Database:** Uses `sqlx` with compile-time checked queries (mostly).
-*   **Logging:** Uses structured logging via `tracing`.
+*   **Logging:** Uses structured logging via `tracing`. Failures in background tasks are logged as errors.
