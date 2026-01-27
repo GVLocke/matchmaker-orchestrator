@@ -1,8 +1,6 @@
-use std::env;
-use dotenvy::dotenv;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value};
-
+use serde_json::Value;
+use anyhow::{Context, Result};
 
 #[derive(Serialize)]
 pub struct LLMRequest {
@@ -44,12 +42,15 @@ pub struct Choice {
 
 const OPENAI_MODEL: &str = "gpt-5-nano";
 
-pub async fn generate_structure_from_pdf(resume_text : &str) -> Result<ChatCompletionResponse, reqwest::Error> {
-    dotenv().ok();
+pub async fn generate_structure_from_pdf(
+    resume_text: &str,
+    client: &reqwest::Client,
+    api_key: &str,
+    schema: &Value
+) -> Result<ChatCompletionResponse> {
     let system_prompt = "You are a resume conversion assistant. Extract information from the user's resume text and format it into the given structure.".to_string();
     let user_prompt = resume_text.to_string();
-    let raw_schema_string = include_str!("../resume_schema.json");
-    let parsed_schema : Value = serde_json::from_str(raw_schema_string).expect("Invalid JSON Schema File");
+    
     let request = LLMRequest {
         model: OPENAI_MODEL.to_string(),
         messages: [
@@ -65,16 +66,18 @@ pub async fn generate_structure_from_pdf(resume_text : &str) -> Result<ChatCompl
             json_schema: JsonSchemaDefinition {
                 name: "resume_data_structuring".to_string(),
                 strict: true,
-                schema: parsed_schema,
+                schema: schema.clone(),
             },
         },
     };
 
-    reqwest::Client::new().post("https://api.openai.com/v1/chat/completions")
-        .bearer_auth(env::var("OPENAI_API_KEY").expect("No OPENAI_API_KEY environment variable"))
+    client.post("https://api.openai.com/v1/chat/completions")
+        .bearer_auth(api_key)
         .json(&request)
         .send()
-        .await?
+        .await
+        .context("Failed to send request to OpenAI")?
         .json::<ChatCompletionResponse>()
         .await
+        .context("Failed to parse OpenAI response")
 }

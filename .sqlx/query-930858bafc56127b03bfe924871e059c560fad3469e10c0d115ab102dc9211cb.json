@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE zip_archives SET processed = TRUE where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "930858bafc56127b03bfe924871e059c560fad3469e10c0d115ab102dc9211cb"
+}
