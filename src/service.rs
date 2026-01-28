@@ -3,8 +3,18 @@ use axum::body::Bytes;
 use serde_json::{Value, from_str, to_string};
 use tempfile::tempfile;
 use uuid::Uuid;
+use aws_sdk_s3::primitives::ByteStream;
 use crate::AppState;
 use crate::requests::openai::generate_structure_from_pdf;
+
+#[derive(Debug, sqlx::Type)]
+#[sqlx(type_name = "job_status", rename_all = "lowercase")]
+pub enum JobStatus {
+    Pending,
+    Processing,
+    Completed,
+    Failed,
+}
 
 pub struct ResumeService {
     state: AppState,
@@ -18,14 +28,33 @@ impl ResumeService {
     pub async fn process_and_update_resume(&self, id: Uuid, filename: String) {
         let _permit = self.state.semaphore.acquire().await.expect("Semaphore closed");
         
+        // Mark as processing
+        let _ = self.update_resume_status(id, JobStatus::Processing, None).await;
+
         // Download
-        let pdf_data = match self.state.supabase.storage().download("resumes", &filename).await {
-            Ok(data) => data,
-            Err(e) => {
-                tracing::error!("Failed to download pdf for filename {}, id {}: {}", filename, id, e);
-                return;
-            }
-        };
+        let pdf_data = match self.state.s3_client.get_object()
+            .bucket("resumes")
+            .key(&filename)
+            .send()
+            .await {
+                Ok(output) => {
+                    match output.body.collect().await {
+                        Ok(data) => data.into_bytes(),
+                        Err(e) => {
+                            let err_msg = format!("Failed to collect pdf body: {}", e);
+                            tracing::error!("{}, filename {}, id {}", err_msg, filename, id);
+                            let _ = self.update_resume_status(id, JobStatus::Failed, Some(err_msg)).await;
+                            return;
+                        }
+                    }
+                }
+                Err(e) => {
+                    let err_msg = format!("Failed to download pdf: {:#?}", e);
+                    tracing::error!("{}, filename {}, id {}", err_msg, filename, id);
+                    let _ = self.update_resume_status(id, JobStatus::Failed, Some(err_msg)).await;
+                    return;
+                }
+            };
 
         // Parse and process
         match self.process_single_pdf(&pdf_data, &filename, id).await {
@@ -33,16 +62,33 @@ impl ResumeService {
                 match self.update_resume_record(id, pdf_text, parsed_json).await {
                     Ok(_) => {
                         tracing::info!("Resume record {} (filename: {}) updated successfully", id, filename);
+                        let _ = self.update_resume_status(id, JobStatus::Completed, None).await;
                     }
                     Err(e) => {
-                        tracing::error!("Failed to update resume record for filename {}, id {}: {}", filename, id, e);
+                        let err_msg = format!("Failed to update database record: {}", e);
+                        tracing::error!("{}, filename {}, id {}", err_msg, filename, id);
+                        let _ = self.update_resume_status(id, JobStatus::Failed, Some(err_msg)).await;
                     }
                 }
             }
             None => {
-                 tracing::warn!("Processing returned None for filename {}, id {}", filename, id);
+                 let err_msg = "PDF processing or LLM parsing failed".to_string();
+                 tracing::warn!("{}, filename {}, id {}", err_msg, filename, id);
+                 let _ = self.update_resume_status(id, JobStatus::Failed, Some(err_msg)).await;
             }
         }
+    }
+
+    async fn update_resume_status(&self, id: Uuid, status: JobStatus, error_message: Option<String>) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            "UPDATE resumes SET status = $1, error_message = $2 WHERE id = $3",
+            status as JobStatus,
+            error_message,
+            id
+        )
+        .execute(&self.state.pool)
+        .await?;
+        Ok(())
     }
 
     pub async fn process_single_pdf(
@@ -104,13 +150,44 @@ impl ResumeService {
             .await
     }
 
+    async fn update_zip_status(&self, id: Uuid, status: JobStatus, error_message: Option<String>) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            "UPDATE zip_archives SET status = $1, error_message = $2 WHERE id = $3",
+            status as JobStatus,
+            error_message,
+            id
+        )
+        .execute(&self.state.pool)
+        .await?;
+        Ok(())
+    }
+
     pub async fn handle_batch_extraction(&self, id: Uuid, filename: String) {
-        let zip_data = match self.state.supabase.storage()
-            .download("zip-archives", &filename)
+        let _permit = self.state.semaphore.acquire().await.expect("Semaphore closed");
+
+        // Mark as processing
+        let _ = self.update_zip_status(id, JobStatus::Processing, None).await;
+
+        let zip_data = match self.state.s3_client.get_object()
+            .bucket("zip-archives")
+            .key(&filename)
+            .send()
             .await {
-                Ok(data) => data,
+                Ok(output) => {
+                    match output.body.collect().await {
+                        Ok(data) => data.into_bytes(),
+                        Err(e) => {
+                            let err_msg = format!("Failed to collect zip body: {}", e);
+                            tracing::error!("{}, filename {}, id {}", err_msg, filename, id);
+                            let _ = self.update_zip_status(id, JobStatus::Failed, Some(err_msg)).await;
+                            return;
+                        }
+                    }
+                }
                 Err(e) => {
-                    tracing::error!("Failed to download zip for filename {}, id {}: {}", filename, id, e);
+                    let err_msg = format!("Failed to download zip: {:#?}", e);
+                    tracing::error!("{}, filename {}, id {}", err_msg, filename, id);
+                    let _ = self.update_zip_status(id, JobStatus::Failed, Some(err_msg)).await;
                     return;
                 }
             };
@@ -118,20 +195,26 @@ impl ResumeService {
         let mut tmp_file = match tempfile() {
              Ok(f) => f,
              Err(e) => {
-                 tracing::error!("Failed to create tempfile: {}", e);
+                 let err_msg = format!("Failed to create tempfile: {}", e);
+                 tracing::error!("{}", err_msg);
+                 let _ = self.update_zip_status(id, JobStatus::Failed, Some(err_msg)).await;
                  return;
              }
         };
         
         if let Err(e) = tmp_file.write_all(&zip_data) {
-             tracing::error!("Failed to write to tempfile: {}", e);
+             let err_msg = format!("Failed to write to tempfile: {}", e);
+             tracing::error!("{}", err_msg);
+             let _ = self.update_zip_status(id, JobStatus::Failed, Some(err_msg)).await;
              return;
         }
         
         let mut archive = match zip::ZipArchive::new(tmp_file) {
             Ok(a) => a,
             Err(e) => {
-                tracing::error!("Failed to create zip archive: {}", e);
+                let err_msg = format!("Failed to create zip archive: {}", e);
+                tracing::error!("{}", err_msg);
+                let _ = self.update_zip_status(id, JobStatus::Failed, Some(err_msg)).await;
                 return;
             }
         };
@@ -160,24 +243,52 @@ impl ResumeService {
             let pdf_name = file.name().to_string();
             let upload_path = format!("{}_{}", filename, pdf_name);
             
-            let supabase = self.state.supabase.clone();
+            let s3_client = self.state.s3_client.clone();
             let semaphore = self.state.semaphore.clone();
+            let pool = self.state.pool.clone(); // Clone pool for DB update
 
             tokio::spawn(async move {
                 let _permit = semaphore.acquire().await.expect("Semaphore closed");
-                let options = supabase::storage::FileOptions {
-                    cache_control: None,
-                    content_type: Some("application/pdf".to_string()),
-                    upsert: false,
-                };
 
-                match supabase.storage()
-                    .upload("resumes", &upload_path, pdf_bytes, Some(options))
+                match s3_client.put_object()
+                    .bucket("resumes")
+                    .key(&upload_path)
+                    .body(ByteStream::from(pdf_bytes))
+                    .content_type("application/pdf")
+                    // .metadata("zip_id", zip_id_str) // Metadata propagation is unreliable, handled via DB update below
+                    .send()
                     .await {
-                        Ok(_) => tracing::info!("Successfully re-uploaded extracted PDF: {}", upload_path),
+                        Ok(_) => {
+                             tracing::info!("Successfully re-uploaded extracted PDF: {}", upload_path);
+                             // Explicitly link the resume to the zip archive
+                             // We use a retry loop briefly in case the trigger hasn't fired yet (race condition)
+                             let mut retries = 0;
+                             while retries < 3 {
+                                 match sqlx::query!("UPDATE resumes SET zip_id = $1 WHERE filename = $2", id, upload_path)
+                                     .execute(&pool)
+                                     .await 
+                                 {
+                                     Ok(result) => {
+                                         if result.rows_affected() > 0 {
+                                             tracing::info!("Linked resume {} to zip_id {}", upload_path, id);
+                                             break;
+                                         } else {
+                                             tracing::warn!("Resume row not found for linking (retry {}): {}", retries, upload_path);
+                                         }
+                                     },
+                                     Err(e) => {
+                                         tracing::error!("Failed to link resume {} to zip_id {}: {}", upload_path, id, e);
+                                     }
+                                 }
+                                 retries += 1;
+                                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                             }
+                        },
                         Err(e) => tracing::error!("Failed to upload extracted PDF {}: {}", upload_path, e),
                     }
             });
         }
+        
+        let _ = self.update_zip_status(id, JobStatus::Completed, None).await;
     }
 }

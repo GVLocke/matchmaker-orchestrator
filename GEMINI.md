@@ -1,23 +1,22 @@
 # Matchmaker Orchestrator
 
 ## Project Overview
-This is a Rust-based backend service built with **Axum** designed to orchestrate the processing of resume files. It acts as a middleware between Supabase Storage, an OpenAI LLM, and a PostgreSQL database.
+This is a Rust-based backend service built with **Axum** designed to orchestrate the processing of resume files. It acts as a middleware between Supabase Storage (via S3 protocol), an OpenAI LLM, and a PostgreSQL database.
 
 **Core Workflow:**
 1.  Receives HTTP webhooks (single file or batch ZIP).
-2.  Downloads files (PDFs or ZIPs) from **Supabase Storage**.
+2.  Downloads files (PDFs or ZIPs) from **Supabase Storage** using the **AWS S3 SDK**.
 3.  Extracts raw text from PDF files using `pdf-extract`.
-4.  Sends the raw text to **OpenAI** to parse it into a structured JSON format (Education, Skills, Experience).
-5.  Updates the corresponding record in a **PostgreSQL** database (via `sqlx`).
+4.  Sends the raw text to **OpenAI** to parse it into a structured JSON format.
+5.  Updates the corresponding record in **PostgreSQL** (via `sqlx`), including status tracking (`pending`, `processing`, `completed`, `failed`) and lineage (linking resumes to their parent ZIP).
 
 ## Architecture
 *   **Framework:** Axum (Web Server)
 *   **Runtime:** Tokio (Async)
 *   **Database:** PostgreSQL (via `sqlx`)
-*   **Storage:** Supabase Storage
-*   **AI Integration:** OpenAI API (for unstructured text parsing)
-*   **Logging:** Tracing & Tracing Subscriber
-*   **Error Handling:** Uses `anyhow` for error propagation and `tracing` for structured logging. Panics are avoided in background tasks.
+*   **Storage:** Supabase Storage (S3-compatible via `aws-sdk-s3`)
+*   **AI Integration:** OpenAI API
+*   **Error Handling:** Status and error messages persisted to DB columns.
 
 ## Key Files
 *   `src/main.rs`: Entry point. Initializes `AppState` (shared DB pool, HTTP client, configuration, Semaphore) and sets up Axum routes.

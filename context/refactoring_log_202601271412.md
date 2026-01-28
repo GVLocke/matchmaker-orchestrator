@@ -1,45 +1,31 @@
-# Refactoring Log: Stability and Architecture Improvements
+# Refactoring Log - 2026-01-27
 
-**Date:** January 27, 2026
-**Focus:** Reliability, Concurrency Control, and Architectural Decoupling
+## Changes Summary
 
-## Summary
-This refactoring session addressed critical stability and architectural issues identified in the codebase critique. The primary goals were to eliminate silent failures ("panics"), prevent resource exhaustion during batch processing, and decouple business logic from HTTP handlers.
+### 1. Storage Infrastructure Migration
+- **Substituted** `supabase-lib-rs` with the official `aws-sdk-s3` crate.
+- **Reasoning**: Decoupled from unofficial libraries and aligned with industry standards for S3-compatible storage.
+- **Implementation**:
+    - Updated `AppState` to hold `aws_sdk_s3::Client`.
+    - Implemented a robust endpoint resolution system that detects local vs. remote Supabase instances.
+    - Added support for `S3_ACCESS_KEY` and `S3_SECRET_KEY` in `.env` to avoid hardcoding credentials.
+    - Configured `force_path_style(true)` to satisfy Supabase Storage requirements.
 
-## Detailed Changes
+### 2. Job Status Tracking
+- **Schema Updates**:
+    - Created `job_status` ENUM (`pending`, `processing`, `completed`, `failed`).
+    - Added `status` and `error_message` columns to `resumes` and `zip_archives`.
+- **Logic**:
+    - `ResumeService` now updates record status at each stage of the lifecycle.
+    - Error messages from S3 and PDF processing are now captured in the database for easier debugging.
 
-### 1. Robust Error Handling (The "Panic" Problem)
-*   **Issue:** The original code relied heavily on `.unwrap()` and `.expect()` in background tasks. A single failure (e.g., a network glitch or malformed PDF) would cause the task to crash silently, leaving no trace in the logs.
-*   **Resolution:** 
-    *   Replaced dangerous unwraps with `Result` based error propagation.
-    *   Introduced `anyhow` for simplified error context handling.
-    *   Implemented comprehensive logging using `tracing::error!` and `tracing::warn!` to capture and report failures in background tasks without crashing the application.
+### 3. Data Lineage (Batch Processing)
+- **Problem**: Individual resumes extracted from a ZIP were not linked to their parent archive.
+- **Solution**: 
+    - Added `zip_id` foreign key to the `resumes` table.
+    - Implemented explicit linking in `ResumeService` after S3 upload.
+    - Includes a retry mechanism to handle potential race conditions with database triggers.
 
-### 2. Shared Infrastructure & Resource Management
-*   **Issue:** `reqwest::Client` was being instantiated for every single OpenAI request, and configuration values (like API keys and schemas) were being read from the environment repeatedly.
-*   **Resolution:**
-    *   Introduced a global `AppState` struct to hold shared resources.
-    *   **Shared HTTP Client:** Created a single `reqwest::Client` in `main.rs` and shared it via `AppState`. This allows for connection pooling and better performance.
-    *   **Pre-loaded Configuration:** The OpenAI API key and the Resume JSON Schema are now loaded and parsed *once* at startup and stored in `AppState`.
-
-### 3. Concurrency Control
-*   **Issue:** The `handle_batch_upload` function would spawn an unbounded number of tasks for every file in a ZIP archive. This posed a severe risk of IP blocking, rate limiting (429 errors), and memory exhaustion.
-*   **Resolution:**
-    *   Added a `tokio::sync::Semaphore` to `AppState`.
-    *   Configured the limit via a `MAX_CONCURRENT_TASKS` environment variable (defaulting to 10).
-    *   Both individual PDF processing and batch re-upload tasks now acquire a permit from this semaphore before proceeding, effectively throttling the workload to safe levels.
-
-### 4. Service Layer Architecture
-*   **Issue:** Axum handlers in `src/requests.rs` were monolithic, mixing HTTP concerns with file processing, database logic, and external API calls.
-*   **Resolution:**
-    *   Created `src/service.rs`.
-    *   Extracted all business logic (PDF extraction, LLM orchestration, Database updates, ZIP handling) into a new `ResumeService` struct.
-    *   Axum handlers now act as a thin layer that simply instantiates the service and delegates the task.
-
-### 5. Dependency Cleanup
-*   **Removed:** Unused `Extension` wrapper usage in favor of Axum's type-safe `State`.
-*   **Added:** `anyhow` for error handling.
-
-## Next Steps
-*   **Database Status Tracking:** While logging is improved, the database still lacks a persistent record of job status (e.g., "Pending", "Failed"). A schema migration to add a `status` column to the `resumes` table is recommended.
-*   **Testing:** With the logic now in `ResumeService`, writing unit and integration tests is significantly easier.
+## Technical Notes
+- **Local Dev Endpoint**: For local Supabase (127.0.0.1:54321), the S3 endpoint must be constructed as `http://127.0.0.1:54321/storage/v1/s3` with the correct Access Key ID (e.g., from `supabase status`).
+- **Trigger Alignment**: Database triggers (`handle_new_resume_upload`) are synchronized with the orchestrator via standard Postgres notifications or direct HTTP calls.
