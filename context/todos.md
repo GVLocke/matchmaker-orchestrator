@@ -23,7 +23,7 @@
 ## Quality & Infrastructure
 - [ ] **Unit Testing**: Implement tests for core logic.
     - *Focus*: `ResumeService` PDF processing, LLM response parsing, and database interaction mocks.
-- [ ] **Verify Batch Trigger**: Ensure uploading extracted PDFs from a batch actually triggers the `scrape/individual` workflow (via Supabase Storage Webhooks or DB triggers).
+- [x] **Verify Batch Trigger**: Ensure uploading extracted PDFs from a batch actually triggers the `scrape/individual` workflow (via Supabase Storage Webhooks or DB triggers).
 
 
 
