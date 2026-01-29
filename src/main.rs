@@ -1,3 +1,4 @@
+mod auth;
 mod requests;
 mod service;
 
@@ -23,6 +24,7 @@ pub struct AppState {
     pub openai_api_key: String,
     pub resume_schema: Value,
     pub semaphore: Arc<Semaphore>,
+    pub jwt_secret: String,
 }
 
 #[tokio::main]
@@ -94,6 +96,8 @@ async fn main() {
     
     tracing::info!("Database connection established");
 
+    let jwt_secret = auth::get_jwt_secret(&pool).await.expect("Failed to get JWT Secret");
+
     let app_state = AppState {
         pool,
         s3_client,
@@ -101,12 +105,17 @@ async fn main() {
         openai_api_key,
         resume_schema,
         semaphore,
+        jwt_secret,
     };
+
+    let protected_routes = Router::new()
+        .route("/ingest/interns/individual", post(handle_single_upload))
+        .route("/ingest/interns/batch", post(handle_batch_upload))
+        .route_layer(axum::middleware::from_fn_with_state(app_state.clone(), auth::auth));
 
     // Create the axum router
     let app = Router::new()
-        .route("/ingest/interns/individual", post(handle_single_upload))
-        .route("/ingest/interns/batch", post(handle_batch_upload))
+        .merge(protected_routes)
         .route("/hello-world", get(hello_world))
         .layer(
         TraceLayer::new_for_http()

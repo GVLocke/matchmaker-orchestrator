@@ -21,3 +21,5 @@ tempfile = "3.24.0"
 anyhow = "1.0.100"
 aws-sdk-s3 = "1.120.0"
 aws-config = "1.8.12"
+jsonwebtoken = { version = "10.3.0", features = ["rust_crypto"] }
+axum-extra = { version = "0.12.5", features = ["typed-header"] }
