@@ -1,4 +1,4 @@
-use std::io::{Read, Write};
+use std::io::{Read, Write, Cursor};
 use axum::body::Bytes;
 use serde_json::{Value, from_str, to_string};
 use tempfile::tempfile;
@@ -6,6 +6,8 @@ use uuid::Uuid;
 use aws_sdk_s3::primitives::ByteStream;
 use crate::AppState;
 use crate::requests::openai::generate_structure_from_pdf;
+use calamine::{Reader, Xlsx, open_workbook_from_rs, DataType};
+use csv::ReaderBuilder;
 
 #[derive(Debug, sqlx::Type)]
 #[sqlx(type_name = "job_status", rename_all = "lowercase")]
@@ -292,3 +294,189 @@ impl ResumeService {
         let _ = self.update_zip_status(id, JobStatus::Completed, None).await;
     }
 }
+
+pub struct ProjectService {
+    state: AppState,
+}
+
+impl ProjectService {
+    pub fn new(state: AppState) -> Self {
+        Self { state }
+    }
+
+    async fn update_upload_status(&self, id: Uuid, status: JobStatus, error_message: Option<String>) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            "UPDATE project_uploads SET status = $1, error_message = $2 WHERE id = $3",
+            status as JobStatus,
+            error_message,
+            id
+        )
+        .execute(&self.state.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn process_project_spreadsheet(&self, id: Uuid, filename: String) {
+        let _permit = self.state.semaphore.acquire().await.expect("Semaphore closed");
+        
+        let _ = self.update_upload_status(id, JobStatus::Processing, None).await;
+
+        let data = match self.state.s3_client.get_object()
+            .bucket("project-spreadsheets")
+            .key(&filename)
+            .send()
+            .await {
+                Ok(output) => {
+                    match output.body.collect().await {
+                        Ok(d) => d.into_bytes(),
+                        Err(e) => {
+                            let err_msg = format!("Failed to collect spreadsheet body: {}", e);
+                            tracing::error!("{}", err_msg);
+                            let _ = self.update_upload_status(id, JobStatus::Failed, Some(err_msg)).await;
+                            return;
+                        }
+                    }
+                }
+                Err(e) => {
+                    let err_msg = format!("Failed to download spreadsheet: {:#?}", e);
+                    tracing::error!("{}", err_msg);
+                    let _ = self.update_upload_status(id, JobStatus::Failed, Some(err_msg)).await;
+                    return;
+                }
+            };
+
+        let projects = if filename.ends_with(".csv") {
+            self.parse_csv(&data)
+        } else if filename.ends_with(".xlsx") || filename.ends_with(".xls") {
+            self.parse_excel(&data)
+        } else {
+            let err_msg = format!("Unsupported file format: {}", filename);
+            let _ = self.update_upload_status(id, JobStatus::Failed, Some(err_msg)).await;
+            return;
+        };
+
+        match projects {
+            Ok(p) => {
+                if let Err(e) = self.insert_projects(id, p).await {
+                    let err_msg = format!("Failed to insert projects into DB: {}", e);
+                    tracing::error!("{}", err_msg);
+                    let _ = self.update_upload_status(id, JobStatus::Failed, Some(err_msg)).await;
+                } else {
+                    let _ = self.update_upload_status(id, JobStatus::Completed, None).await;
+                }
+            }
+            Err(e) => {
+                let err_msg = format!("Failed to parse spreadsheet: {}", e);
+                tracing::error!("{}", err_msg);
+                let _ = self.update_upload_status(id, JobStatus::Failed, Some(err_msg)).await;
+            }
+        }
+    }
+
+    fn parse_csv(&self, data: &[u8]) -> anyhow::Result<Vec<ProjectData>> {
+        let mut rdr = ReaderBuilder::new()
+            .has_headers(true)
+            .from_reader(data);
+        
+        let mut projects = Vec::new();
+        for result in rdr.deserialize() {
+            let project: ProjectData = result?;
+            projects.push(project);
+        }
+        Ok(projects)
+    }
+
+    fn parse_excel(&self, data: &[u8]) -> anyhow::Result<Vec<ProjectData>> {
+        let cursor = Cursor::new(data);
+        let mut excel: Xlsx<_> = open_workbook_from_rs(cursor)?;
+        
+        let range = excel.worksheet_range_at(0)
+            .ok_or_else(|| anyhow::anyhow!("No sheets found in Excel file"))??;
+
+        let mut projects = Vec::new();
+        let mut headers = Vec::new();
+
+        for (i, row) in range.rows().enumerate() {
+            if i == 0 {
+                headers = row.iter().map(|c| c.to_string().to_lowercase()).collect();
+                continue;
+            }
+
+            let mut title = String::new();
+            let mut description = String::new();
+            let mut requirements = String::new();
+            let mut manager = String::new();
+            let mut deadline = String::new();
+            let mut priority = 0i16;
+            let mut intern_cap = 1i16;
+
+            for (j, cell) in row.iter().enumerate() {
+                let header = headers.get(j).map(|s| s.as_str()).unwrap_or("");
+                match header {
+                    "title" | "project name" => title = cell.to_string(),
+                    "description" | "about" => description = cell.to_string(),
+                    "requirements" | "skills" => requirements = cell.to_string(),
+                    "manager" | "lead" => manager = cell.to_string(),
+                    "deadline" | "due date" => deadline = cell.to_string(),
+                    "priority" => priority = cell.as_i64().unwrap_or(0) as i16,
+                    "intern_cap" | "capacity" | "interns" => intern_cap = cell.as_i64().unwrap_or(1) as i16,
+                    _ => {}
+                }
+            }
+
+            if !title.is_empty() {
+                projects.push(ProjectData {
+                    title,
+                    description,
+                    requirements,
+                    manager,
+                    deadline,
+                    priority,
+                    intern_cap,
+                });
+            }
+        }
+        Ok(projects)
+    }
+
+    async fn insert_projects(&self, upload_id: Uuid, projects: Vec<ProjectData>) -> Result<(), sqlx::Error> {
+        for p in projects {
+            sqlx::query!(
+                "INSERT INTO projects (upload_id, title, description, requirements, manager, deadline, priority, intern_cap)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                upload_id,
+                p.title,
+                p.description,
+                p.requirements,
+                p.manager,
+                p.deadline,
+                p.priority,
+                p.intern_cap
+            )
+            .execute(&self.state.pool)
+            .await?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ProjectData {
+    #[serde(alias = "Project Name", alias = "project name", alias = "Title", alias = "title")]
+    pub title: String,
+    #[serde(alias = "Description", alias = "description", alias = "About", alias = "about")]
+    pub description: String,
+    #[serde(alias = "Requirements", alias = "requirements", alias = "Skills", alias = "skills")]
+    pub requirements: String,
+    #[serde(alias = "Manager", alias = "manager", alias = "Lead", alias = "lead")]
+    pub manager: String,
+    #[serde(alias = "Deadline", alias = "deadline", alias = "Due Date", alias = "due date")]
+    pub deadline: String,
+    #[serde(default)]
+    pub priority: i16,
+    #[serde(alias = "Capacity", alias = "capacity", alias = "Interns", alias = "interns", default = "default_cap")]
+    pub intern_cap: i16,
+}
+
+fn default_cap() -> i16 { 1 }
+

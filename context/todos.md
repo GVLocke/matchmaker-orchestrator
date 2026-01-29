@@ -20,7 +20,8 @@
     - *Context*: Implemented via `notify_orchestrator_secure` function and `pgjwt`. Revert script available in `context/revert_secure_webhooks.sql`.
 
 ## New Features (from Project Scope)
-- [ ] **Project Data Ingestion**: Parse project spreadsheets (CSV/XLSX) and insert into DB.
+- [x] **Project Data Ingestion**: Parse project spreadsheets (CSV/XLSX) and insert into DB.
+    - *Context*: Implemented `ProjectService` with CSV and Excel support. Added tables and storage triggers.
 - [ ] **Vector Embeddings**: Generate embeddings for structured Resume JSON and Project data.
 - [ ] **Neural Network Integration**: Create interface to query the custom neural network with embeddings.
 

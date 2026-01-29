@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 use axum::{routing::get, routing::post, Router};
 use dotenvy::dotenv;
-use requests::{handle_single_upload, handle_batch_upload};
+use requests::{handle_single_upload, handle_batch_upload, handle_project_upload};
 use tower_http::trace::{self, TraceLayer};
 use tracing::Level;
 use sqlx::postgres::PgPoolOptions;
@@ -111,6 +111,7 @@ async fn main() {
     let protected_routes = Router::new()
         .route("/ingest/interns/individual", post(handle_single_upload))
         .route("/ingest/interns/batch", post(handle_batch_upload))
+        .route("/ingest/projects", post(handle_project_upload))
         .route_layer(axum::middleware::from_fn_with_state(app_state.clone(), auth::auth));
 
     // Create the axum router
