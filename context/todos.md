@@ -16,8 +16,8 @@
     - *Context*: `POST /scrape/individual` and `POST /scrape/batch` are already implemented in `src/requests.rs` and registered in `src/main.rs`.
 - [x] **API Authentication**: Secure endpoints with JWT middleware.
     - *Context*: Implemented in `src/auth.rs` and integrated into `src/main.rs`.
-- [ ] **Secure Database Webhooks**: Update triggers to use dynamic JWTs.
-    - *Context*: See `context/plan_secure_webhooks.md`.
+- [x] **Secure Database Webhooks**: Update triggers to use dynamic JWTs.
+    - *Context*: Implemented via `notify_orchestrator_secure` function and `pgjwt`. Revert script available in `context/revert_secure_webhooks.sql`.
 
 ## New Features (from Project Scope)
 - [ ] **Project Data Ingestion**: Parse project spreadsheets (CSV/XLSX) and insert into DB.
