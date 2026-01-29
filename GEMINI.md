@@ -34,14 +34,28 @@ This is a Rust-based backend service built with **Axum** designed to orchestrate
 *   OpenAI API Key
 
 ### Environment Variables
-The application requires a `.env` file or system environment variables:
+The application requires a `.env` file or system environment variables. For cloud development, use the **Supabase Session Pooler** URL to ensure compatibility without direct IPv4 access.
+
 ```env
-DATABASE_URL=postgres://user:pass@host:port/dbname
+DATABASE_URL=postgres://postgres.[PROJ_REF]:[PASS]@aws-1-us-east-2.pooler.supabase.com:5432/postgres
 SUPABASE_ENDPOINT=https://your-project.supabase.co
 SERVICE_KEY=your-supabase-service-role-key
 OPENAI_API_KEY=your-openai-api-key
-MAX_CONCURRENT_TASKS=10  # Optional: Defaults to 10 if not set
+S3_ACCESS_KEY=your-supabase-s3-access-key
+S3_SECRET_KEY=your-supabase-s3-secret-key
+MAX_CONCURRENT_TASKS=10
 ```
+
+### Storage Configuration
+The service expects the following buckets to exist in Supabase Storage:
+- `resumes`: For individual PDF resume files.
+- `zip-archives`: For batch ZIP uploads.
+
+### Local Development with Cloud
+The project is currently linked to the **InternProjectMatchmaker** cloud project (`pkckwgszwgrvxwwdofcj`). 
+
+*   **MCP Server:** The Supabase MCP server is configured to interact directly with this cloud environment.
+*   **Webhooks:** Use a tool like **ngrok** to expose your local port (default `3000`) so that Supabase Cloud Webhooks can reach your local orchestrator.
 
 ### Commands
 *   **Run Development Server:**

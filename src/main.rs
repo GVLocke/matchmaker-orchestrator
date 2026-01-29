@@ -105,8 +105,8 @@ async fn main() {
 
     // Create the axum router
     let app = Router::new()
-        .route("/scrape/individual", post(handle_single_upload))
-        .route("/scrape/batch", post(handle_batch_upload))
+        .route("/ingest/interns/individual", post(handle_single_upload))
+        .route("/ingest/interns/batch", post(handle_batch_upload))
         .route("/hello-world", get(hello_world))
         .layer(
         TraceLayer::new_for_http()
