@@ -15,6 +15,7 @@ use aws_sdk_s3::Client as S3Client;
 use aws_config::Region;
 use sqlx::PgPool;
 use serde_json::Value;
+use url::Url;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -40,17 +41,16 @@ async fn main() {
         .expect("MAX_CONCURRENT_TASKS must be a number");
 
     // Extract project ref and build S3 endpoint
-    let (s3_endpoint, project_ref) = if endpoint.contains("127.0.0.1") || endpoint.contains("localhost") {
+    let parsed_url = Url::parse(&endpoint).expect("Invalid SUPABASE_ENDPOINT URL");
+    let host_str = parsed_url.host_str().expect("SUPABASE_ENDPOINT missing host");
+    
+    let (s3_endpoint, project_ref) = if host_str == "127.0.0.1" || host_str == "localhost" {
         let clean_endpoint = endpoint.trim_end_matches('/');
         (format!("{}/storage/v1/s3/", clean_endpoint), "local-stub".to_string())
     } else {
-        let ref_id = endpoint
-            .replace("https://", "")
-            .replace("http://", "")
-            .replace(".supabase.co", "")
-            .trim_end_matches('/')
-            .to_string();
-        (format!("https://{}.supabase.co/storage/v1/s3/", ref_id), ref_id)
+        // Assume standard supabase URL format: https://<project_ref>.supabase.co
+        let project_ref = host_str.split('.').next().unwrap_or("unknown").to_string();
+        (format!("https://{}.supabase.co/storage/v1/s3/", project_ref), project_ref)
     };
     
     tracing::info!("Configured S3 Endpoint: {}", s3_endpoint);

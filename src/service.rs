@@ -1,6 +1,6 @@
 use std::io::{Read, Write, Cursor};
 use axum::body::Bytes;
-use serde_json::{Value, from_str, to_string};
+use serde_json::{Value, from_str};
 use tempfile::tempfile;
 use uuid::Uuid;
 use aws_sdk_s3::primitives::ByteStream;
@@ -31,7 +31,9 @@ impl ResumeService {
         let _permit = self.state.semaphore.acquire().await.expect("Semaphore closed");
         
         // Mark as processing
-        let _ = self.update_resume_status(id, JobStatus::Processing, None).await;
+        if let Err(e) = self.update_resume_status(id, JobStatus::Processing, None).await {
+            tracing::error!("Failed to update status to Processing for resume {}: {}", id, e);
+        }
 
         // Download
         let pdf_data = match self.state.s3_client.get_object()
@@ -45,7 +47,9 @@ impl ResumeService {
                         Err(e) => {
                             let err_msg = format!("Failed to collect pdf body: {}", e);
                             tracing::error!("{}, filename {}, id {}", err_msg, filename, id);
-                            let _ = self.update_resume_status(id, JobStatus::Failed, Some(err_msg)).await;
+                            if let Err(stat_e) = self.update_resume_status(id, JobStatus::Failed, Some(err_msg)).await {
+                                tracing::error!("Failed to update status to Failed for resume {}: {}", id, stat_e);
+                            }
                             return;
                         }
                     }
@@ -53,7 +57,9 @@ impl ResumeService {
                 Err(e) => {
                     let err_msg = format!("Failed to download pdf: {:#?}", e);
                     tracing::error!("{}, filename {}, id {}", err_msg, filename, id);
-                    let _ = self.update_resume_status(id, JobStatus::Failed, Some(err_msg)).await;
+                    if let Err(stat_e) = self.update_resume_status(id, JobStatus::Failed, Some(err_msg)).await {
+                        tracing::error!("Failed to update status to Failed for resume {}: {}", id, stat_e);
+                    }
                     return;
                 }
             };
@@ -64,19 +70,25 @@ impl ResumeService {
                 match self.update_resume_record(id, pdf_text, parsed_json).await {
                     Ok(_) => {
                         tracing::info!("Resume record {} (filename: {}) updated successfully", id, filename);
-                        let _ = self.update_resume_status(id, JobStatus::Completed, None).await;
+                        if let Err(e) = self.update_resume_status(id, JobStatus::Completed, None).await {
+                            tracing::error!("Failed to update status to Completed for resume {}: {}", id, e);
+                        }
                     }
                     Err(e) => {
                         let err_msg = format!("Failed to update database record: {}", e);
                         tracing::error!("{}, filename {}, id {}", err_msg, filename, id);
-                        let _ = self.update_resume_status(id, JobStatus::Failed, Some(err_msg)).await;
+                        if let Err(stat_e) = self.update_resume_status(id, JobStatus::Failed, Some(err_msg)).await {
+                            tracing::error!("Failed to update status to Failed for resume {}: {}", id, stat_e);
+                        }
                     }
                 }
             }
             None => {
                  let err_msg = "PDF processing or LLM parsing failed".to_string();
                  tracing::warn!("{}, filename {}, id {}", err_msg, filename, id);
-                 let _ = self.update_resume_status(id, JobStatus::Failed, Some(err_msg)).await;
+                 if let Err(e) = self.update_resume_status(id, JobStatus::Failed, Some(err_msg)).await {
+                    tracing::error!("Failed to update status to Failed for resume {}: {}", id, e);
+                 }
             }
         }
     }
@@ -107,7 +119,7 @@ impl ResumeService {
             }
         };
         
-        tracing::debug!("PDF Text Contents for filename {}, id {}: {}", filename, id, pdf_text);
+        // Removed PII logging of full PDF text
         
         let response = generate_structure_from_pdf(
             &pdf_text, 
@@ -122,9 +134,8 @@ impl ResumeService {
                     let raw_content = &choice.message.content;
                     match from_str::<Value>(raw_content) {
                         Ok(parsed_json) => {
-                             let pretty_json = to_string(&parsed_json).unwrap_or_else(|_| "{}".to_string());
                              tracing::info!("LLM-generated JSON received for filename {}, id {}", filename, id);
-                             tracing::debug!("LLM-generated JSON for filename {}, id {}: {}", filename, id, pretty_json);
+                             // Removed PII logging of parsed JSON
                              Some((pdf_text, parsed_json))
                         },
                         Err(e) => {
@@ -168,7 +179,9 @@ impl ResumeService {
         let _permit = self.state.semaphore.acquire().await.expect("Semaphore closed");
 
         // Mark as processing
-        let _ = self.update_zip_status(id, JobStatus::Processing, None).await;
+        if let Err(e) = self.update_zip_status(id, JobStatus::Processing, None).await {
+            tracing::error!("Failed to update status to Processing for zip {}: {}", id, e);
+        }
 
         let zip_data = match self.state.s3_client.get_object()
             .bucket("zip-archives")
@@ -181,7 +194,9 @@ impl ResumeService {
                         Err(e) => {
                             let err_msg = format!("Failed to collect zip body: {}", e);
                             tracing::error!("{}, filename {}, id {}", err_msg, filename, id);
-                            let _ = self.update_zip_status(id, JobStatus::Failed, Some(err_msg)).await;
+                            if let Err(stat_e) = self.update_zip_status(id, JobStatus::Failed, Some(err_msg)).await {
+                                tracing::error!("Failed to update status to Failed for zip {}: {}", id, stat_e);
+                            }
                             return;
                         }
                     }
@@ -189,7 +204,9 @@ impl ResumeService {
                 Err(e) => {
                     let err_msg = format!("Failed to download zip: {:#?}", e);
                     tracing::error!("{}, filename {}, id {}", err_msg, filename, id);
-                    let _ = self.update_zip_status(id, JobStatus::Failed, Some(err_msg)).await;
+                    if let Err(stat_e) = self.update_zip_status(id, JobStatus::Failed, Some(err_msg)).await {
+                        tracing::error!("Failed to update status to Failed for zip {}: {}", id, stat_e);
+                    }
                     return;
                 }
             };
@@ -199,7 +216,9 @@ impl ResumeService {
              Err(e) => {
                  let err_msg = format!("Failed to create tempfile: {}", e);
                  tracing::error!("{}", err_msg);
-                 let _ = self.update_zip_status(id, JobStatus::Failed, Some(err_msg)).await;
+                 if let Err(stat_e) = self.update_zip_status(id, JobStatus::Failed, Some(err_msg)).await {
+                     tracing::error!("Failed to update status to Failed for zip {}: {}", id, stat_e);
+                 }
                  return;
              }
         };
@@ -207,7 +226,9 @@ impl ResumeService {
         if let Err(e) = tmp_file.write_all(&zip_data) {
              let err_msg = format!("Failed to write to tempfile: {}", e);
              tracing::error!("{}", err_msg);
-             let _ = self.update_zip_status(id, JobStatus::Failed, Some(err_msg)).await;
+             if let Err(stat_e) = self.update_zip_status(id, JobStatus::Failed, Some(err_msg)).await {
+                 tracing::error!("Failed to update status to Failed for zip {}: {}", id, stat_e);
+             }
              return;
         }
         
@@ -216,7 +237,9 @@ impl ResumeService {
             Err(e) => {
                 let err_msg = format!("Failed to create zip archive: {}", e);
                 tracing::error!("{}", err_msg);
-                let _ = self.update_zip_status(id, JobStatus::Failed, Some(err_msg)).await;
+                if let Err(stat_e) = self.update_zip_status(id, JobStatus::Failed, Some(err_msg)).await {
+                    tracing::error!("Failed to update status to Failed for zip {}: {}", id, stat_e);
+                }
                 return;
             }
         };
@@ -291,7 +314,9 @@ impl ResumeService {
             });
         }
         
-        let _ = self.update_zip_status(id, JobStatus::Completed, None).await;
+        if let Err(e) = self.update_zip_status(id, JobStatus::Completed, None).await {
+            tracing::error!("Failed to update status to Completed for zip {}: {}", id, e);
+        }
     }
 }
 
