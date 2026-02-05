@@ -254,7 +254,7 @@ impl ResumeService {
                 }
             };
             
-            if file.is_dir() || !file.name().ends_with(".pdf") {
+            if file.is_dir() || !file.name().ends_with(".pdf") || file.name().starts_with('.') {
                 continue;
             }
 
@@ -465,10 +465,19 @@ impl ProjectService {
     }
 
     async fn insert_projects(&self, upload_id: Uuid, projects: Vec<ProjectData>) -> Result<(), sqlx::Error> {
+        // Fetch the term from the project_uploads table
+        let term = sqlx::query!(
+            "SELECT term FROM project_uploads WHERE id = $1",
+            upload_id
+        )
+        .fetch_one(&self.state.pool)
+        .await?
+        .term;
+
         for p in projects {
             sqlx::query!(
-                "INSERT INTO projects (upload_id, title, description, requirements, manager, deadline, priority, intern_cap)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                "INSERT INTO projects (upload_id, title, description, requirements, manager, deadline, priority, intern_cap, term)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
                 upload_id,
                 p.title,
                 p.description,
@@ -476,7 +485,8 @@ impl ProjectService {
                 p.manager,
                 p.deadline,
                 p.priority,
-                p.intern_cap
+                p.intern_cap,
+                term
             )
             .execute(&self.state.pool)
             .await?;
