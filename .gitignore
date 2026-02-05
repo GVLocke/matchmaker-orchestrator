@@ -1,3 +1,10 @@
 /target
 .env
-Cargo.lock
+.env.*
+
+# IDEs
+.idea/
+.vscode/
+
+# OS
+.DS_Store
