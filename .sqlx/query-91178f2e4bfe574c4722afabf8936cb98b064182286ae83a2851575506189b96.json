@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'app_jwt_secret'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "decrypted_secret",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "91178f2e4bfe574c4722afabf8936cb98b064182286ae83a2851575506189b96"
+}
