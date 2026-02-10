@@ -4,11 +4,14 @@
 This is a Rust-based backend service built with **Axum** designed to orchestrate the processing of resume files. It acts as a middleware between Supabase Storage (via S3 protocol), an OpenAI LLM, and a PostgreSQL database.
 
 **Core Workflow:**
-1.  Receives HTTP webhooks (single file or batch ZIP).
-2.  Downloads files (PDFs or ZIPs) from **Supabase Storage** using the **AWS S3 SDK**.
-3.  Extracts raw text from PDF files using `pdf-extract`.
-4.  Sends the raw text to **OpenAI** to parse it into a structured JSON format.
-5.  Updates the corresponding record in **PostgreSQL** (via `sqlx`), including status tracking (`pending`, `processing`, `completed`, `failed`) and lineage (linking resumes to their parent ZIP).
+1.  Receives HTTP webhooks (single file, batch ZIP, or project spreadsheet).
+2.  Downloads files from **Supabase Storage** using the **AWS S3 SDK**.
+3.  Extracts "Term" metadata (e.g., "Spring 2026") from the storage path.
+4.  Processes files:
+    - **PDFs:** Extracts raw text and uses **OpenAI** to parse into structured JSON.
+    - **ZIPs:** Extracts and re-uploads PDFs to term-specific subdirectories.
+    - **Spreadsheets (CSV/XLSX):** Parses project data and inserts into the database.
+5.  Updates records in **PostgreSQL** (via `sqlx`), tracking status, errors, and term lineage.
 
 ## Architecture
 *   **Framework:** Axum (Web Server)
@@ -76,10 +79,15 @@ Triggers processing for a single uploaded PDF.
 *   **Payload:** JSON containing the file record (ID and filename).
 *   **Behavior:** Spawns a background task via `ResumeService`. Returns HTTP 202 Accepted immediately.
 
-### `POST /scrape/batch`
+### `POST /ingest/resumes/batch`
 Triggers processing for a ZIP archive of resumes.
 *   **Payload:** JSON containing the file record.
 *   **Behavior:** Spawns a background task via `ResumeService` to extract the ZIP and re-upload individual PDFs. Returns HTTP 202 Accepted.
+
+### `POST /ingest/projects`
+Triggers processing for a project spreadsheet (CSV or XLSX).
+*   **Payload:** JSON containing the file record.
+*   **Behavior:** Spawns a background task via `ProjectService` to parse rows and insert into the `projects` table. Returns HTTP 202 Accepted.
 
 ## Development Conventions
 *   **State Management:** All shared state is held in `AppState` and injected via Axum's `State` extractor.

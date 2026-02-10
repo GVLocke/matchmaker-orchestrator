@@ -66,15 +66,26 @@ The server listens on `0.0.0.0:3000` by default.
 
 ## API Endpoints
 
-### `POST /scrape/individual`
+The first three endpoints are not called manually, but are activated by a Supabase webhook when the relevant file is uploaded to the right storage bucket.
+
+### `POST /ingest/interns/individual`
 Processes a single uploaded PDF.
 *   **Payload:** JSON with file ID and filename.
 *   **Response:** `202 Accepted` (processing continues in background).
 
-### `POST /scrape/batch`
+### `POST /ingest/interns/batch`
 Processes a ZIP archive containing multiple resumes.
 *   **Payload:** JSON with file ID and filename.
 *   **Response:** `202 Accepted`.
+
+### `POST /ingest/projects`
+Processes a .csv or .xlsx spreadsheet file with project data.
+* **Payload:** JSON with file ID and filename
+* **Response:** `202 Accepted`.
+
+### `GET /hello-world`
+Basic test endpoint.
+* **Response:** `Hello, World!`
 
 ## Development
 
