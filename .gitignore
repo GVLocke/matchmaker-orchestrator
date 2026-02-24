@@ -5,6 +5,7 @@
 # IDEs
 .idea/
 .vscode/
+ai-trust-testing/
 
 # OS
 .DS_Store
